@@ -7,7 +7,6 @@
 
 > a persistent key-value database built from scratch in pure python.
 
-i wanted to learn how databases actually work, so i built one.
 
 minikv is a redis-compatible database with two storage engines:
 
@@ -105,22 +104,11 @@ cold restart         50k keys in 0.16s
 
 ## why?
 
-mostly because databases are cool.
-
-i wanted to understand how systems like redis, bitcask, leveldb and rocksdb actually work instead of treating them like magic boxes.
+i like databases
 
 ---
 
-## what's next
 
-* raft / leader election
-* failover
-* range scans
-* leveled compaction
-* hint files
-* fsync batching
-
-or maybe i'll get distracted and build something else.
 
 ---
 
