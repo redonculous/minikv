@@ -52,6 +52,11 @@ The demo saves data over a real TCP connection, then **simulates a power-cut cra
 - **Log compaction** — stale versions and tombstones are merged away on demand, reclaiming disk space
 - **Key expiry (TTL)** — lazy expiry on read, plus purging at compaction time
 - **Redis-compatible wire protocol** — `GET`, `SET` (with `EX/PX/NX/XX`), `DEL`, `EXPIRE`, `TTL`, `INCR`, `APPEND`, `KEYS` globbing, and more
+- **Transactions** — `MULTI`/`EXEC`/`DISCARD`: queue commands and run the batch atomically
+- **Replication** — start a second server with `--replicaof`; it pulls a full copy of the dataset, then receives every write live
+- **Snapshots** — `SAVE` writes a point-in-time copy of all live keys to a single restorable file
+- **Two interchangeable storage engines** — the default Bitcask-style log engine, or an LSM-tree (`--engine lsm`) with sorted SSTables, sparse indexes, and **bloom filters** so reads skip files that can't contain the key
+- **mmap reads** — sealed data files are memory-mapped; reads are zero-copy slices, no seek/read syscalls
 - **Concurrent** — asyncio server handles many simultaneous clients; the engine itself is thread-safe
 - **Zero dependencies** — runs anywhere Python 3.10+ runs
 
@@ -118,11 +123,14 @@ cold restart            50,000 keys re-indexed in 0.16s
 ```bash
 git clone https://github.com/<you>/minikv && cd minikv
 
-# start the server
+# start the server (add --engine lsm for the LSM-tree backend)
 python3 -m minikv.server --dir ./data --port 6479
 
 # talk to it
 python3 -m minikv.cli
+
+# optional: start a live read replica in another terminal
+python3 -m minikv.server --dir ./replica --port 6480 --replicaof 127.0.0.1 6479
 ```
 
 Or embed the engine directly — it's just a library:
@@ -137,7 +145,7 @@ with StorageEngine("./data") as db:
 
 ## Testing
 
-48 tests cover the full stack, including the failure modes that matter for a database:
+73 tests cover the full stack, including the failure modes that matter for a database:
 
 ```bash
 python3 -m unittest discover tests -v
@@ -148,15 +156,20 @@ python3 -m unittest discover tests -v
 - **Restart cycles** — data, deletes, and TTLs must all survive a process restart
 - **Concurrency** — 8 threads hammering the engine, 5 parallel TCP clients hammering the server
 - **Protocol fuzzing-lite** — RESP requests delivered one byte at a time, pipelined requests, binary-unsafe payloads
+- **Replication, end-to-end** — a real leader and replica on separate ports; full sync, live write streaming, and replicated deletes are all verified over TCP
+- **Transactions** — atomic batches, DISCARD, errors mid-batch
+- **Bloom filter maths** — zero false negatives over 1,000 members; false-positive rate within bounds over 10,000 probes
 
 ## Project layout
 
 ```
 minikv/
 ├── minikv/
-│   ├── storage.py    # the engine: log, keydir, recovery, compaction
+│   ├── storage.py    # Bitcask engine: log, keydir, mmap reads, recovery, compaction, snapshots
+│   ├── lsm.py        # LSM-tree engine: memtable, WAL, sorted SSTables, sparse index
+│   ├── bloom.py      # bloom filter used by the LSM engine's SSTables
 │   ├── resp.py       # incremental RESP protocol parser/encoder
-│   ├── server.py     # asyncio TCP server + command handlers
+│   ├── server.py     # asyncio TCP server, transactions, replication
 │   ├── client.py     # synchronous client library
 │   └── cli.py        # interactive REPL
 ├── tests/            # 48 tests: unit, integration, crash/corruption
@@ -166,9 +179,10 @@ minikv/
 
 ## What I'd build next
 
+- **Leader election / failover** — replicas exist; promoting one automatically when the leader dies is the next step (hello, Raft)
+- **Range queries over the wire** — the LSM engine already keeps keys sorted; expose `SCAN start end` as a command
+- **Leveled compaction** — the LSM engine currently merges everything at once; real LSM trees compact in tiers
 - **Hint files** — snapshot the keydir at compaction so cold starts don't re-scan every record
-- **Range queries** — swap the hash index for a sorted structure (the road to an LSM-tree)
-- **Replication** — stream the log to a follower; the append-only design makes this natural
 - **`fsync` batching / group commit** — full durability without paying per-write
 
 ## License

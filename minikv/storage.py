@@ -27,6 +27,7 @@ ones containing only the latest live value of each key.
 
 from __future__ import annotations
 
+import mmap
 import os
 import struct
 import threading
@@ -136,11 +137,14 @@ class StorageEngine:
         self._active_size = path.stat().st_size if path.exists() else 0
 
     def _reader(self, file_id: int):
-        fh = self._readers.get(file_id)
-        if fh is None:
-            fh = open(self._path(file_id), "rb")
-            self._readers[file_id] = fh
-        return fh
+        """Sealed files are immutable, so map them into memory once and
+        serve every read as a zero-copy slice (no seek/read syscalls)."""
+        mm = self._readers.get(file_id)
+        if mm is None:
+            with open(self._path(file_id), "rb") as fh:
+                mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+            self._readers[file_id] = mm
+        return mm
 
     # --------------------------------------------------------------- api
     def put(self, key: bytes, value: bytes, expiry: int = 0) -> None:
@@ -165,18 +169,14 @@ class StorageEngine:
                 # Lazy expiry: remove on read.
                 self._delete_internal(key)
                 return None
-            fh = self._reader(entry.file_id) if entry.file_id != self._active_id else None
-            if fh is None:
+            if entry.file_id == self._active_id:
                 self._active.flush()
-                fh = open(self._path(entry.file_id), "rb")
-                try:
+                with open(self._path(entry.file_id), "rb") as fh:
                     fh.seek(entry.offset)
                     buf = fh.read(entry.record_size)
-                finally:
-                    fh.close()
             else:
-                fh.seek(entry.offset)
-                buf = fh.read(entry.record_size)
+                mm = self._reader(entry.file_id)
+                buf = mm[entry.offset:entry.offset + entry.record_size]
             _key, value, _ts, _exp, tomb, _size = _decode_at(buf, 0)
             return None if tomb else value
 
@@ -267,6 +267,21 @@ class StorageEngine:
             after = sum(self._path(f).stat().st_size for f in self._data_file_ids())
             return {"files_merged": len(old_ids),
                     "bytes_before": before, "bytes_after": after}
+
+    # ------------------------------------------------------------ snapshot
+    def snapshot(self, path: str | Path) -> Path:
+        """Write a point-in-time copy of every live key to a single file.
+
+        The output uses the normal record format, so a snapshot can be
+        restored simply by renaming it to ``0000000000.mkv`` inside a
+        fresh data directory.
+        """
+        path = Path(path)
+        with self._lock, open(path, "wb") as out:
+            for key, value in self.items():
+                out.write(_encode(key, value, time.time_ns(),
+                                  self.expiry_of(key) or 0))
+        return path
 
     # ------------------------------------------------------------- close
     def close(self) -> None:
