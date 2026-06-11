@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.mkv
+minikv-data/
+.venv/
+dist/
+build/
+*.egg-info/

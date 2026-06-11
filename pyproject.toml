@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minikv"
+version = "1.0.0"
+description = "A persistent, Redis-compatible key-value database built from scratch in pure Python"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["database", "key-value", "bitcask", "redis", "storage-engine"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Database :: Database Engines/Servers",
+]
+
+[project.scripts]
+minikv-server = "minikv.server:main"
+minikv-cli = "minikv.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["minikv*"]
