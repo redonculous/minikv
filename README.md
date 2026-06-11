@@ -109,9 +109,6 @@ i like databases
 ---
 
 
-
----
-
 ## repository
 
 https://github.com/redonculous/minikv
